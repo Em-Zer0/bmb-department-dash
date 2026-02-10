@@ -1,4 +1,3 @@
-
 <!doctype html>
 <html lang="en">
 <head>
@@ -26,7 +25,9 @@
       border:1px solid rgba(0,0,0,.10);
       background: linear-gradient(180deg, #fbf4d8 0%, #f3e7bf 55%, #d8c98f 100%);
       box-shadow: 0 16px 46px rgba(0,0,0,.25);
-      user-select:none; touch-action:manipulation;
+      user-select:none;
+      touch-action:none; /* IMPORTANT: prevents scrolling and allows touch controls */
+      -webkit-tap-highlight-color: transparent;
     }
     .panel{
       margin-top:10px;
@@ -81,11 +82,12 @@
     <div class="panel">
       <div style="display:grid; gap:10px;">
         <div class="pills">
-          <div class="pill"><b>Space</b>/<b>W</b>/<b>↑</b> Jump</div>
-          <div class="pill"><b>F</b> Throw Pen</div>
+          <div class="pill"><b>PC:</b> Space/W/↑ Jump</div>
+          <div class="pill"><b>PC:</b> F Throw Pen</div>
+          <div class="pill"><b>Phone:</b> Tap LEFT = Jump</div>
+          <div class="pill"><b>Phone:</b> Tap RIGHT = Throw</div>
           <div class="pill"><b>Enter</b> Start/Pause</div>
           <div class="pill"><b>R</b> Restart</div>
-          <div class="pill">Click/Tap = Throw Pen</div>
         </div>
 
         <div style="display:flex; gap:10px; flex-wrap:wrap;">
@@ -143,25 +145,20 @@
   const baseSpeed = 190; // 1.0x baseline
 
   // Difficulty curve (controls BOTH speed + spawn frequency growth)
-  // Make it grow steadily but not instantly insane:
-  // - after 60s: ~1.9x difficulty
-  // - after 120s: ~2.8x difficulty
-  // - continues upward
   function difficultyFromTime(t){
-    return 1 + (t / 55); // linear ramp; tweak 55 to change pace
+    return 1 + (t / 55); // tweak 55 to ramp slower/faster
   }
 
   const loseScore = -50;
 
-  // Base spawn ranges (will be divided by difficulty => more frequent later)
+  // Base spawn ranges (divided by difficulty => more frequent later)
   const teacherSpawnMin = 2.2;
   const teacherSpawnMax = 3.8;
-  const examSpawnMin    = 4.6;   // rarer
+  const examSpawnMin    = 4.6;
   const examSpawnMax    = 7.4;
 
-  // How much spawn speeds up relative to difficulty
-  const teacherSpawnScale = 1.0; // full effect
-  const examSpawnScale    = 0.65; // slower effect so exams stay rarer
+  const teacherSpawnScale = 1.0;
+  const examSpawnScale    = 0.65;
 
   // Pen
   const penSpeed = 880;
@@ -263,15 +260,14 @@
 
   const teacherKeys = ["ZHH", "MEH", "NN"];
 
-  // ========= Permanent teacher images (from files) =========
-  // Put these files in: assets/zhh.png assets/meh.png assets/nn.png
+  // Permanent teacher images (from files)
   const teacherPhoto = { ZHH: null, MEH: null, NN: null };
 
   function loadImg(path){
     return new Promise((resolve) => {
       const img = new Image();
       img.onload = () => resolve(img);
-      img.onerror = () => resolve(null); // if missing, just return null
+      img.onerror = () => resolve(null);
       img.src = path;
     });
   }
@@ -282,7 +278,7 @@
     teacherPhoto.NN  = await loadImg("assets/nn.png");
   }
 
-  // Fallback cartoon faces if image files are missing
+  // Fallback cartoon faces
   function svgToImg(svg) {
     const img = new Image();
     const encoded = encodeURIComponent(svg).replace(/'/g, "%27").replace(/"/g, "%22");
@@ -296,7 +292,6 @@
   };
 
   function getTeacherFace(key){
-    // prefer real photos if available
     return teacherPhoto[key] || builtFace[key];
   }
 
@@ -327,7 +322,7 @@
     pens.push({ x: player.x + player.w + 18, y: player.y + 44, w: 64, h: 10, vx: penSpeed });
   }
 
-  // Input
+  // Keyboard input (PC)
   window.addEventListener("keydown", (e)=>{
     if (["Space","ArrowUp","KeyW"].includes(e.code)){ e.preventDefault(); wantJump = true; }
     if (e.code === "KeyF") wantShoot = true;
@@ -339,14 +334,30 @@
     if (e.code === "KeyF") wantShoot = false;
   });
 
-  canvas.addEventListener("pointerdown", (e)=>{
+  // ✅ PHONE FIX: Tap left = jump, tap right = shoot
+  function handlePointerAction(e){
+    // prevent page scroll / zoom gestures
+    e.preventDefault?.();
+
     if (mode === "WELCOME") { mode = "INSTRUCTIONS"; return; }
     if (mode === "INSTRUCTIONS") { mode = "PLAY"; running = true; ensureMusicState(); return; }
     if (gameOver) { restart(); return; }
-    shoot();
-    canvas.setPointerCapture?.(e.pointerId);
-  });
 
+    // Determine where the user tapped (left or right side of canvas)
+    const rect = canvas.getBoundingClientRect();
+    const px = (e.clientX - rect.left) / rect.width; // 0..1 across canvas
+
+    if (px < 0.5) jump();     // left half
+    else shoot();             // right half
+  }
+
+  // Pointer (works for mouse + touch)
+  canvas.addEventListener("pointerdown", (e)=>{
+    handlePointerAction(e);
+    canvas.setPointerCapture?.(e.pointerId);
+  }, { passive:false });
+
+  // Buttons
   btnStart.onclick = ()=>{
     if (mode === "WELCOME") { mode = "INSTRUCTIONS"; return; }
     if (mode === "INSTRUCTIONS") { mode = "PLAY"; running = true; ensureMusicState(); return; }
@@ -429,12 +440,11 @@
 
     aliveTime += dt;
 
-    // Difficulty grows with time
     const dif = difficultyFromTime(aliveTime);
     difEl.textContent = dif.toFixed(1) + "x";
 
-    // Speed grows with difficulty (NO CAP)
-    speed = baseSpeed * (0.95 + 0.75 * dif); // steady ramp; keeps increasing
+    // speed keeps increasing (no cap)
+    speed = baseSpeed * (0.95 + 0.75 * dif);
     const mult = speed / baseSpeed;
     spdEl.textContent = mult.toFixed(1) + "x";
 
@@ -451,7 +461,7 @@
       player.onGround = true;
     }
 
-    // spawn timers (frequency increases with difficulty)
+    // spawn frequency increases with difficulty
     nextTeacher -= dt;
     nextExam    -= dt;
 
@@ -469,7 +479,13 @@
 
     // move doors
     for (const d of doors) d.x -= speed * dt * 0.22;
-    wrapDoors();
+    for (const d of doors){
+      if (d.x + d.w < -120){
+        const maxX = Math.max(...doors.map(o => o.x));
+        d.x = maxX + 320;
+        d.label = doorLabels[Math.floor(rand(0, doorLabels.length))];
+      }
+    }
 
     // pens
     for (const p of pens) p.x += p.vx * dt;
@@ -531,16 +547,6 @@
     updateHUD();
   }
 
-  function wrapDoors(){
-    for (const d of doors){
-      if (d.x + d.w < -120){
-        const maxX = Math.max(...doors.map(o => o.x));
-        d.x = maxX + 320;
-        d.label = doorLabels[Math.floor(rand(0, doorLabels.length))];
-      }
-    }
-  }
-
   function updateHUD(){ scoreEl.textContent = score; }
 
   // Drawing
@@ -558,7 +564,7 @@
     for (const te of teachers) drawTeacherWithBody(te);
     for (const ex of exams) drawExam(ex);
 
-    if (!running && !gameOver) overlay("Paused", "Press Enter or click Start / Continue");
+    if (!running && !gameOver) overlay("Paused", "Press Enter or tap Start / Continue");
     if (gameOver) overlay("Game Over", (endGame.msg || "Try again") + "  (Press R)");
   }
 
@@ -575,7 +581,7 @@
     ctx.fillText("“Stay sterile. Think molecular. Survive the corridor.”", W/2, 232);
     ctx.fillStyle = "rgba(25,30,40,0.70)";
     ctx.font = "16px system-ui";
-    ctx.fillText("Click / Tap / Press Enter to continue", W/2, 290);
+    ctx.fillText("Tap / Click / Press Enter to continue", W/2, 290);
     ctx.restore();
   }
 
@@ -594,14 +600,15 @@
       "Exams: cannot be destroyed — only jump over them.",
       "Hit MIDTERM → -5 points. Hit FINAL → -10 points.",
       "If your score reaches -50 → you lose.",
-      "Speed + obstacle frequency increase as you survive."
+      "Speed + obstacle frequency increase as you survive.",
+      "Phone: Tap LEFT = Jump, Tap RIGHT = Throw."
     ];
-    let y = 170;
-    for (const line of lines) { ctx.fillText(line, W/2, y); y += 32; }
+    let y = 160;
+    for (const line of lines) { ctx.fillText(line, W/2, y); y += 30; }
 
     ctx.fillStyle = "rgba(25,30,40,0.70)";
     ctx.font = "16px system-ui";
-    ctx.fillText("Click / Tap / Press Enter to start playing", W/2, 420);
+    ctx.fillText("Tap / Click / Press Enter to start", W/2, 430);
     ctx.restore();
   }
 
@@ -638,11 +645,6 @@
       ctx.globalAlpha = 0.20;
       ctx.fillStyle = "rgba(255,255,255,1)";
       roundRect(d.x, d.y, d.w, d.h, 12);
-      ctx.fill();
-
-      ctx.globalAlpha = 0.22;
-      ctx.fillStyle = "rgba(20,20,20,1)";
-      roundRect(d.x+10, d.y+14, d.w-20, 20, 10);
       ctx.fill();
 
       ctx.globalAlpha = 0.80;
@@ -730,25 +732,10 @@
     ctx.globalAlpha = 0.95;
     roundRect(0, 0, p.w-12, p.h, 5); ctx.fill();
 
-    const grip = ctx.createLinearGradient(0,0,0,p.h);
-    grip.addColorStop(0, "rgba(30,30,50,0.7)");
-    grip.addColorStop(1, "rgba(10,10,20,0.8)");
-    ctx.fillStyle = grip;
-    roundRect(10, 1, 18, p.h-2, 5); ctx.fill();
-
-    const tip = ctx.createLinearGradient(p.w-16,0,p.w,0);
-    tip.addColorStop(0, "rgba(240,240,245,0.9)");
-    tip.addColorStop(1, "rgba(120,120,130,0.9)");
-    ctx.fillStyle = tip;
-    ctx.beginPath();
-    ctx.moveTo(p.w-12, 0); ctx.lineTo(p.w, p.h/2); ctx.lineTo(p.w-12, p.h);
-    ctx.closePath(); ctx.fill();
-
     ctx.restore();
     ctx.globalAlpha = 1;
   }
 
-  // Teacher with body + photo face + very visible name badge
   function drawTeacherWithBody(te){
     ctx.save();
     const alpha = te.dead ? Math.max(0, te.fade) * 0.35 : 0.98;
@@ -756,7 +743,6 @@
 
     const x = te.x, y = te.y;
 
-    // lab coat body
     ctx.fillStyle = "rgba(255,255,255,0.93)";
     roundRect(x, y+30, te.w, te.h-30, 12); ctx.fill();
 
@@ -764,11 +750,6 @@
     roundRect(x+10, y+te.h-26, 10, 24, 6); ctx.fill();
     roundRect(x+te.w-20, y+te.h-26, 10, 24, 6); ctx.fill();
 
-    ctx.fillStyle = "rgba(255,255,255,0.90)";
-    roundRect(x-6, y+38, 12, 26, 8); ctx.fill();
-    roundRect(x+te.w-6, y+38, 12, 26, 8); ctx.fill();
-
-    // face
     const faceR = 16;
     const faceCx = x + te.w/2;
     const faceCy = y + 18;
@@ -778,7 +759,6 @@
     ctx.beginPath();
     ctx.arc(faceCx, faceCy, faceR, 0, Math.PI*2);
     ctx.clip();
-
     const imgW = faceImg.width || 220;
     const imgH = faceImg.height || 220;
     const scale = Math.max((faceR*2)/imgW, (faceR*2)/imgH);
@@ -787,12 +767,11 @@
     ctx.drawImage(faceImg, faceCx - dw/2, faceCy - dh/2, dw, dh);
     ctx.restore();
 
-    // head outline
     ctx.strokeStyle = "rgba(0,0,0,0.25)";
     ctx.lineWidth = 2;
     ctx.beginPath(); ctx.arc(faceCx, faceCy, faceR, 0, Math.PI*2); ctx.stroke();
 
-    // NAME badge (very visible)
+    // Name badge
     const badgeW = te.w + 26;
     const badgeH = 22;
     const bx = x + te.w/2 - badgeW/2;
@@ -839,7 +818,6 @@
     ctx.globalAlpha = 0.35;
     ctx.fillStyle = "white";
     ctx.fillRect(0,0,W,H);
-
     ctx.globalAlpha = 1;
     ctx.textAlign = "center";
     ctx.fillStyle = "rgba(25,30,40,0.95)";
@@ -848,7 +826,6 @@
     ctx.fillStyle = "rgba(25,30,40,0.78)";
     ctx.font = "16px system-ui";
     ctx.fillText(subtitle, W/2, H/2 + 22);
-
     ctx.restore();
     ctx.textAlign = "left";
   }
@@ -884,3 +861,5 @@
 </script>
 </body>
 </html>
+
+
